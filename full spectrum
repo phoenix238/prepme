@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prep Me App</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans h-screen flex flex-col">
+
+  <main class="flex-grow overflow-y-auto pb-24 p-4 md:p-8 max-w-4xl mx-auto w-full space-y-6">
+    
+    <header class="text-center mb-6 pt-4">
+      <h1 class="text-4xl font-extrabold text-blue-700 tracking-tight">prep me.</h1>
+    </header>
+
+    <section id="tab-prep" class="view-section bg-white p-6 rounded-xl shadow-md border border-gray-200">
+      
+      <div class="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+        <label class="block text-sm font-bold text-gray-700 mb-2">Anthropic API Key</label>
+        <div class="flex gap-2">
+          <input type="password" id="api-key-input" placeholder="sk-ant-..." class="flex-grow border p-2 rounded focus:ring-2 focus:ring-blue-500">
+          <button onclick="saveApiKey()" class="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-900 font-medium">Save</button>
+        </div>
+        <p id="api-status" class="text-xs text-green-600 mt-2 hidden">Key saved to local storage.</p>
+      </div>
+
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <h2 class="text-2xl font-bold">Plan Your Week</h2>
+          <p class="text-sm text-gray-500">Find the absolute cheapest configurations across meat & veg aisles.</p>
+        </div>
+        <button onclick="callClaudeAPI()" id="generate-btn" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-bold shadow-md transition">
+          Generate Meals
+        </button>
+      </div>
+
+      <div id="recipe-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <p class="text-gray-400 italic">Enter your key and click generate to analyze Tesco's aisles.</p>
+      </div>
+      
+      <button onclick="switchTab('tab-cart')" class="w-full mt-6 bg-blue-600 text-white font-bold py-3 rounded-lg hidden shadow-md" id="proceed-to-cart-btn">
+        Proceed to Cart
+      </button>
+    </section>
+
+    <section id="tab-cart" class="view-section hidden bg-white p-6 rounded-xl shadow-md border border-gray-200">
+      <h2 class="text-2xl font-bold mb-2">Final Review & Cart</h2>
+      <p class="text-sm text-gray-500 mb-6">Cross-referencing recipes with your pantry...</p>
+      
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div>
+          <h3 class="text-lg font-semibold mb-3 text-red-600 border-b pb-2">🛒 Sending to Tesco</h3>
+          <ul id="items-to-buy" class="space-y-2 mb-4 text-sm"></ul>
+          <div id="cart-total" class="text-right font-bold text-lg text-gray-900 border-t pt-2">Total: £0.00</div>
+          <button onclick="checkoutAndSave()" class="w-full mt-6 bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 shadow-md">
+            Checkout to Cookbook
+          </button>
+        </div>
+
+        <div>
+          <h3 class="text-lg font-semibold mb-3 text-green-700 border-b pb-2">🏠 Using from Pantry</h3>
+          <div id="items-from-pantry" class="space-y-2 text-sm mb-4"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-cookbook" class="view-section hidden bg-white p-6 rounded-xl shadow-md border border-gray-200">
+      <h2 class="text-2xl font-bold mb-2">My Cookbook</h2>
+      <p class="text-sm text-gray-500 mb-6">Your confirmed meals for the week.</p>
+      <div id="cookbook-list" class="space-y-4">
+         <p class="text-gray-400 italic">Checkout to see your recipes here.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] pb-safe">
+    <div class="flex justify-around max-w-4xl mx-auto">
+      <button onclick="switchTab('tab-prep')" id="nav-tab-prep" class="flex-1 py-4 text-center font-bold text-blue-600 border-t-2 border-blue-600 transition">
+        🍽️ Prep Me
+      </button>
+      <button onclick="switchTab('tab-cart')" id="nav-tab-cart" class="flex-1 py-4 text-center font-bold text-gray-400 border-t-2 border-transparent hover:text-gray-600 transition">
+        🛒 Purchase
+      </button>
+      <button onclick="switchTab('tab-cookbook')" id="nav-tab-cookbook" class="flex-1 py-4 text-center font-bold text-gray-400 border-t-2 border-transparent hover:text-gray-600 transition">
+        📖 Cookbook
+      </button>
+    </div>
+  </nav>
+
+  <script>
+    // --- STATE ---
+    let appState = {
+      pantry: { "Cooking Oil": true, "Salt": true, "Soy Sauce": true, "Rice": true },
+      generatedRecipes: [],
+      selectedRecipeIds: [],
+      myCookbook: []
+    };
+
+    // --- INITIALIZATION ---
+    window.onload = () => {
+      const savedKey = localStorage.getItem('anthropic_key');
+      if (savedKey) {
+        document.getElementById('api-key-input').value = savedKey;
+        document.getElementById('api-status').classList.remove('hidden');
+      }
+    };
+
+    // --- TAB ROUTING ---
+    function switchTab(tabId) {
+      document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+      document.getElementById(tabId).classList.remove('hidden');
+      
+      const tabs = ['tab-prep', 'tab-cart', 'tab-cookbook'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`nav-${t}`);
+        if (t === tabId) {
+          btn.classList.add('text-blue-600', 'border-blue-600');
+          btn.classList.remove('text-gray-400', 'border-transparent');
+        } else {
+          btn.classList.add('text-gray-400', 'border-transparent');
+          btn.classList.remove('text-blue-600', 'border-blue-600');
+        }
+      });
+
+      if (tabId === 'tab-cart') renderCheckout();
+      if (tabId === 'tab-cookbook') renderCookbook();
+    }
+
+    // --- API & GENERATION ---
+    function saveApiKey() {
+      const key = document.getElementById('api-key-input').value.trim();
+      if (key) {
+        localStorage.setItem('anthropic_key', key);
+        document.getElementById('api-status').classList.remove('hidden');
+      }
+    }
+
+    async function callClaudeAPI() {
+      const key = localStorage.getItem('anthropic_key');
+      if (!key) return alert("Please save your Anthropic API key first.");
+
+      const btn = document.getElementById('generate-btn');
+      const list = document.getElementById('recipe-list');
+      
+      btn.innerText = "Analyzing Macro-Promotions...";
+      btn.disabled = true;
+      list.innerHTML = `
+        <div class="col-span-full text-center py-8 text-blue-600 font-bold animate-pulse">
+          🤖 Triggering live multi-aisle scraper...<br>
+          <span class="text-xs text-gray-400 font-normal">Extracting grocery values.</span>
+        </div>`;
+
+      try {
+        // 1. RUN THE MULTI-AISLE SCRAPER LIVE VIA API
+        const apifyToken = 'apify_api_9jOIZHe3Tf6LeMpCFdBa7bY3KRZBrU3g6WnN'; 
+        const apifyUrl = `https://api.apify.com/v2/acts/shahidirfan~tesco-products-scraper/run-sync-get-dataset-items?token=${apifyToken}`;
+        
+        const scraperConfig = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                "customUrls": [
+                  "https://www.tesco.com/groceries/en-GB/browse/fresh-food/fresh-meat-and-poultry/all",
+                  "https://www.tesco.com/groceries/en-GB/browse/fresh-food/fresh-vegetables/all"
+                ],
+                "maxItems": 45, 
+                "maxPages": 1
+            })
+        };
+
+        const apifyResponse = await fetch(apifyUrl, scraperConfig);
+        if (!apifyResponse.ok) throw new Error("Macro-scraper failed to gather category trends.");
+        
+        const tescoInventory = await apifyResponse.json();
+        
+        list.innerHTML = `
+          <div class="col-span-full text-center py-8 text-purple-600 font-bold animate-pulse">
+            📋 ${tescoInventory.length} Items Captured! <br>
+            <span class="text-xs text-gray-400 font-normal">Claude is calculating cross-category price efficiencies...</span>
+          </div>`;
+
+        const inventoryPayload = tescoInventory.map(item => {
+            return {
+                name: item.name,
+                price: item.price,
+                isDiscounted: item.isLowEverydayPricing || item.promotion || false
+            };
+        });
+
+        const dataString = JSON.stringify(inventoryPayload);
+
+        const systemPrompt = `You are a high-efficiency budget architect. Analyze this Tesco grocery inventory block: ${dataString}.
+        Your goal: Identify which ingredients yield the absolute cheapest meal plans. Look for items marked with 'isDiscounted: true' or exceptionally low base prices.
+        Design 3 separate meals. Group them from the single cheapest meal option to the most expensive out of the selection.
+        Return ONLY a raw JSON array of objects without backticks or markdown wrappers. Format:
+        [
+          {
+            "id": 1, 
+            "name": "Recipe Name", 
+            "cost": 3.20, 
+            "instructions": "Steps.", 
+            "ingredients": [ {"name": "Item Name Match", "price": 1.20} ]
+          }
+        ]`;
+
+        const claudeResponse = await fetch('https://corsproxy.io/?https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerously-allow-browser': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-3-haiku-20240307',
+            max_tokens: 1200,
+            messages: [{ role: 'user', content: systemPrompt }]
+          })
+        });
+
+        if (!claudeResponse.ok) throw new Error(`Claude optimization engine rejected the prompt.`);
+        
+        const data = await claudeResponse.json();
+        let jsonString = data.content[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        appState.generatedRecipes = JSON.parse(jsonString);
+        renderRecipes();
+
+      } catch (err) {
+        console.error("Macro System Failure:", err);
+        list.innerHTML = `<p class="text-red-600 font-bold col-span-full text-center">Optimization Loop Failed: ${err.message}</p>`;
+      } finally {
+        btn.innerText = "Generate Meals";
+        btn.disabled = false;
+      }
+    }
+
+    function renderRecipes() {
+      const list = document.getElementById('recipe-list');
+      list.innerHTML = '';
+      appState.generatedRecipes.sort((a, b) => a.cost - b.cost);
+      appState.generatedRecipes.forEach(recipe => {
+        list.innerHTML += `
+          <div class="border rounded-lg p-4 flex flex-col justify-between hover:shadow-md transition cursor-pointer bg-white" onclick="toggleRecipe(${recipe.id}, this)">
+            <div>
+              <h3 class="font-bold text-lg text-gray-900">${recipe.name}</h3>
+              <p class="text-sm text-green-600 font-semibold mb-2">Est. Cost: £${recipe.cost.toFixed(2)}</p>
+              <p class="text-xs text-gray-500 line-clamp-2">${recipe.instructions}</p>
+            </div>
+            <div class="mt-4 text-center py-2 bg-gray-100 text-gray-500 rounded font-bold text-sm pointer-events-none status-indicator transition-colors">Select</div>
+          </div>
+        `;
+      });
+    }
+
+    function toggleRecipe(id, el) {
+      const indicator = el.querySelector('.status-indicator');
+      if (appState.selectedRecipeIds.includes(id)) {
+        appState.selectedRecipeIds = appState.selectedRecipeIds.filter(rId => rId !== id);
+        el.classList.remove('border-blue-600', 'bg-blue-50', 'border-2');
+        indicator.classList.replace('bg-blue-600', 'bg-gray-100');
+        indicator.classList.replace('text-white', 'text-gray-500');
+        indicator.innerText = "Select";
+      } else {
+        appState.selectedRecipeIds.push(id);
+        el.classList.add('border-blue-600', 'bg-blue-50', 'border-2');
+        indicator.classList.replace('bg-gray-100', 'bg-blue-600');
+        indicator.classList.replace('text-gray-500', 'text-white');
+        indicator.innerText = "Selected";
+      }
+      
+      const btn = document.getElementById('proceed-to-cart-btn');
+      appState.selectedRecipeIds.length > 0 ? btn.classList.remove('hidden') : btn.classList.add('hidden');
+    }
+
+    function renderCheckout() {
+      let allIngredients = [];
+      appState.selectedRecipeIds.forEach(id => {
+        const recipe = appState.generatedRecipes.find(r => r.id === id);
+        allIngredients.push(...recipe.ingredients);
+      });
+
+      const uniqueIngredients = [];
+      const map = new Map();
+      for (const item of allIngredients) {
+          if(!map.has(item.name)){ map.set(item.name, true); uniqueIngredients.push(item); }
+      }
+
+      const toBuyEl = document.getElementById('items-to-buy');
+      const fromPantryEl = document.getElementById('items-from-pantry');
+      toBuyEl.innerHTML = ''; fromPantryEl.innerHTML = '';
+      
+      let total = 0;
+
+      uniqueIngredients.forEach(item => {
+        if (appState.pantry[item.name]) {
+          fromPantryEl.innerHTML += `<div class="p-2 bg-green-50 border border-green-100 rounded text-green-800 font-medium">✔️ ${item.name}</div>`;
+        } else {
+          total += item.price;
+          toBuyEl.innerHTML += `<li class="flex justify-between border-b pb-1 text-gray-800"><span>${item.name}</span> <span class="font-bold">£${item.price.toFixed(2)}</span></li>`;
+        }
+      });
+
+      document.getElementById('cart-total').innerText = `Total: £${total.toFixed(2)}`;
+    }
+
+    function checkoutAndSave() {
+      appState.myCookbook = appState.generatedRecipes.filter(r => appState.selectedRecipeIds.includes(r.id));
+      switchTab('tab-cookbook');
+    }
+
+    function renderCookbook() {
+      const cbList = document.getElementById('cookbook-list');
+      cbList.innerHTML = '';
+      if(appState.myCookbook.length === 0) return cbList.innerHTML = '<p class="text-gray-500">No recipes saved yet.</p>';
+
+      appState.myCookbook.forEach(recipe => {
+        cbList.innerHTML += `
+          <div class="p-4 bg-orange-50 border border-orange-200 rounded-lg shadow-sm">
+            <h3 class="font-bold text-xl text-orange-900 mb-2">${recipe.name}</h3>
+            <h4 class="font-semibold text-sm text-gray-600 mb-1">Ingredients:</h4>
+            <ul class="list-disc pl-5 text-sm text-gray-800 mb-3">
+              ${recipe.ingredients.map(i => `<li>${i.name}</li>`).join('')}
+            </ul>
+            <h4 class="font-semibold text-sm text-gray-600 mb-1">Instructions:</h4>
+            <p class="text-sm text-gray-800 leading-relaxed">${recipe.instructions}</p>
+          </div>
+        `;
+      });
+    }
+  </script>
+</body>
+</html>
